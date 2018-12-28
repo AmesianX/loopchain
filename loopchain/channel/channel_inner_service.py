@@ -63,6 +63,8 @@ class ChannelInnerTask:
                 async with self._citizen_condition_new_block:
                     await self._citizen_condition_new_block.wait()
 
+            logging.warning(f"announce_new_block to: {self._citizen_set}")
+
             new_block_height = subscriber_block_height + 1
             new_block = blockchain.find_block_by_height(new_block_height)
 
@@ -79,12 +81,15 @@ class ChannelInnerTask:
         if len(self._citizen_set) >= conf.SUBSCRIBE_LIMIT:
             return False
         else:
+            logging.warning(f"register new subscriber: {remote_address}")
             self._citizen_set.add(remote_address)
             return True
 
     @message_queue_task
     async def unregister_subscriber(self, remote_address):
+        logging.warning(f"unregister_subscriber: {remote_address}")
         self._citizen_set.remove(remote_address)
+        logging.warning(f"remaining subscribers: {remote_address}")
 
     @message_queue_task
     def get_peer_list(self):
