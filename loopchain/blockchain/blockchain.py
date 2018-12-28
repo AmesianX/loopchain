@@ -44,6 +44,9 @@ class BlockChain:
     TRANSACTION_COUNT_KEY = b'TRANSACTION_COUNT'
     LAST_BLOCK_KEY = b'last_block_key'
     BLOCK_HEIGHT_KEY = b'block_height_key'
+
+    # Additional information of the block is generated when the add_block phase of the consensus is reached.
+    BLOCK_INFO_KEY = b'block_info_key'
     INVOKE_RESULT_BLOCK_HEIGHT_KEY = b'invoke_result_block_height_key'
 
     def __init__(self, blockchain_db=None, channel_name=None):
@@ -234,29 +237,7 @@ class BlockChain:
             finally:
                 self.__invoke_results.pop(block.header.hash, None)
 
-            # a condition for the exception case of genesis block.
-            next_total_tx = self.__total_tx
-            if block.header.height > 0:
-                next_total_tx += len(block.body.transactions)
-
-            bit_length = next_total_tx.bit_length()
-            byte_length = (bit_length + 7) // 8
-            next_total_tx_bytes = next_total_tx.to_bytes(byte_length, byteorder='big')
-
-            block_version = self.__block_versioner.get_version(block.header.height)
-            block_serializer = BlockSerializer.new(block_version, self.tx_versioner)
-            block_serialized = json.dumps(block_serializer.serialize(block))
-            block_hash_encoded = block.header.hash.hex().encode(encoding='UTF-8')
-
-            batch = leveldb.WriteBatch()
-            batch.Put(block_hash_encoded, block_serialized.encode("utf-8"))
-            batch.Put(BlockChain.LAST_BLOCK_KEY, block_hash_encoded)
-            batch.Put(BlockChain.TRANSACTION_COUNT_KEY, next_total_tx_bytes)
-            batch.Put(
-                BlockChain.BLOCK_HEIGHT_KEY +
-                block.header.height.to_bytes(conf.BLOCK_HEIGHT_BYTES_LEN, byteorder='big'),
-                block_hash_encoded)
-            self.__confirmed_block_db.Write(batch)
+            next_total_tx = self.__write_block_data(block)
 
             self.__last_block = block
             self.__block_height = self.__last_block.header.height
@@ -282,6 +263,34 @@ class BlockChain:
             ObjectManager().channel_service.inner_service.notify_new_block()
 
             return True
+
+    def __write_block_data(self, block):
+        # a condition for the exception case of genesis block.
+        next_total_tx = self.__total_tx
+        if block.header.height > 0:
+            next_total_tx += len(block.body.transactions)
+
+        bit_length = next_total_tx.bit_length()
+        byte_length = (bit_length + 7) // 8
+        next_total_tx_bytes = next_total_tx.to_bytes(byte_length, byteorder='big')
+
+        block_version = self.__block_versioner.get_version(block.header.height)
+        block_serializer = BlockSerializer.new(block_version, self.tx_versioner)
+        block_serialized = json.dumps(block_serializer.serialize(block))
+        block_hash_encoded = block.header.hash.hex().encode(encoding='UTF-8')
+
+        batch = leveldb.WriteBatch()
+        batch.Put(block_hash_encoded, block_serialized.encode("utf-8"))
+        batch.Put(BlockChain.LAST_BLOCK_KEY, block_hash_encoded)
+        batch.Put(BlockChain.TRANSACTION_COUNT_KEY, next_total_tx_bytes)
+        batch.Put(
+            BlockChain.BLOCK_HEIGHT_KEY +
+            block.header.height.to_bytes(conf.BLOCK_HEIGHT_BYTES_LEN, byteorder='big'),
+            block_hash_encoded)
+
+        self.__confirmed_block_db.Write(batch)
+
+        return next_total_tx
 
     def prevent_next_block_mismatch(self, next_height: int) -> bool:
         logging.debug(f"prevent_block_mismatch...")
